@@ -1,144 +1,51 @@
-import { FormEventHandler, useEffect, useRef, useState, memo } from "react";
+import { useQueryParam, ArrayParam } from "use-query-params";
 
-type CommandInputProps = {
-  onAdd: (channel: string) => void;
-  onDelete: (channel: string) => void;
-};
+import { CommandInput } from "./CommandInput";
+import { TwitchPlayer } from "./TwitchPlayer";
 
-const CommandInput: React.FC<CommandInputProps> = ({ onAdd, onDelete }) => {
-  const [visible, setVisible] = useState(false);
-  const [input, setInput] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+const MAX_STREAMS = 8;
 
-  useEffect(() => {
-    const handleKeyEvent = (event: KeyboardEvent) => {
-      switch (event.key) {
-        case ":":
-          setVisible(true);
-          inputRef.current?.focus();
-          break;
-        case "Escape":
-          setVisible(false);
-      }
-    };
-
-    document.body.addEventListener("keydown", handleKeyEvent);
-    return () => {
-      document.body.removeEventListener("keydown", handleKeyEvent);
-    };
-  }, []);
-
-  const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
-    event.preventDefault();
-
-    const match = /(?<cmd>[a-z]+)\s+(?<arg>\w+)/.exec(input.trim());
-
-    if (match !== null && match.groups !== undefined) {
-      switch (match.groups.cmd) {
-        case "add":
-          onAdd(match.groups.arg);
-          break;
-        case "del":
-          onDelete(match.groups.arg);
-          break;
-        default:
-          console.log(`Unkown command: "${input}"`);
-      }
-    }
-
-    setInput("");
-  };
-
-  return visible ? (
-    <form className="fixed w-full" onSubmit={handleSubmit}>
-      <input
-        className="w-full bg-black text-green-600"
-        ref={inputRef}
-        value={input[0] === ":" ? input : `:${input}`}
-        onChange={(e) => setInput(e.target.value.slice(1))}
-      />
-    </form>
-  ) : null;
-};
-
-type TwitchPlayerProps = {
-  channel: string;
-  className: string;
-};
-
-const TwitchPlayer: React.FC<TwitchPlayerProps> = memo(
-  ({ channel, className }) => {
-    const ref = useRef();
-
-    useEffect(() => {
-      // @ts-ignore
-      ref.current = new Twitch.Embed(channel, {
-        width: "100%",
-        height: "100%",
-        layout: "video",
-        channel,
-      });
-
-      return () => {
-        // @ts-ignore
-        ref.current?.destroy();
-      };
-    }, [channel]);
-
-    return <div id={channel} className={className}></div>;
-  }
-);
-
-function App() {
-  const [channels, setChannels] = useState<Set<string>>(() => new Set());
-
-  let layout: number[][];
-  switch (channels.size) {
+const lookupLayout = (size: number, index: number): number[] => {
+  switch (size) {
     case 1:
-      layout = [[12, 6]];
-      break;
+      return [[12, 6]][index];
     case 2:
-      layout = [
+      return [
         [6, 6],
         [6, 6],
-      ];
-      break;
+      ][index];
     case 3:
-      layout = [
+      return [
         [12, 3],
         [6, 3],
         [6, 3],
-      ];
-      break;
+      ][index];
     case 4:
-      layout = [
+      return [
         [6, 3],
         [6, 3],
         [6, 3],
         [6, 3],
-      ];
-      break;
+      ][index];
     case 5:
-      layout = [
+      return [
         [6, 3],
         [6, 3],
         [4, 3],
         [4, 3],
         [4, 3],
-      ];
-      break;
+      ][index];
     case 6:
-      layout = [
+      return [
         [4, 3],
         [4, 3],
         [4, 3],
         [4, 3],
         [4, 3],
         [4, 3],
-      ];
-      break;
+      ][index];
     case 7:
-      layout = [
+      return [
         [4, 3],
         [4, 3],
         [4, 3],
@@ -146,10 +53,9 @@ function App() {
         [3, 3],
         [3, 3],
         [3, 3],
-      ];
-      break;
+      ][index];
     case 8:
-      layout = [
+      return [
         [3, 3],
         [3, 3],
         [3, 3],
@@ -157,40 +63,85 @@ function App() {
         [3, 3],
         [3, 3],
         [3, 3],
-      ];
-      break;
+        [3, 3],
+      ][index];
+    default:
+      return [];
   }
+};
+
+function App() {
+  const [channels, setChannels] = useQueryParam("channel", ArrayParam);
+
+  const handleChannelAdded = (...channels: string[]) => {
+    setChannels(
+      (state) =>
+        Array.from(new Set([...(state || []), ...channels])).slice(
+          0,
+          MAX_STREAMS
+        ),
+      "replace"
+    );
+  };
+
+  const handleChannelRemoved = (...channels: string[]) => {
+    setChannels(
+      (state) =>
+        (state || []).filter((s) => s === null || !channels.includes(s)),
+      "replace"
+    );
+  };
+
+  const handleChannelSwapped = (channel1: string, channel2: string) => {
+    setChannels((state) => {
+      const parseIndex = (input: string): number => {
+        let index = parseInt(input, 10);
+        return isNaN(index) ? (state || []).indexOf(input) : index;
+      };
+
+      let i1 = parseIndex(channel1);
+      let i2 = parseIndex(channel2);
+
+      if (i1 < 0 || i2 < 0) {
+        return state;
+      }
+
+      const oldState = state || [];
+      const newState = [...oldState];
+      newState[i2] = oldState[i1];
+      newState[i1] = oldState[i2];
+
+      return newState;
+    }, "replace");
+  };
 
   return (
-    <>
+    <div className="bg-black h-screen flex flex-col">
       <CommandInput
-        onAdd={(channel: string) => {
-          setChannels((state) => {
-            const newState = new Set(state);
-            if (newState.size < 8) {
-              newState.add(channel);
-            }
-            return newState;
-          });
-        }}
-        onDelete={(channel: string) => {
-          setChannels((state) => {
-            const newState = new Set(state);
-            newState.delete(channel);
-            return newState;
-          });
-        }}
+        onAdd={handleChannelAdded}
+        onDelete={handleChannelRemoved}
+        onSwap={handleChannelSwapped}
       />
-      <div className="h-screen grid grid-cols-12 grid-rows-6">
-        {Array.from(channels).map((channel, i) => (
-          <TwitchPlayer
-            key={channel}
-            className={`col-span-${layout[i][0]} row-span-${layout[i][1]}`}
-            channel={channel}
-          />
-        ))}
-      </div>
-    </>
+      {channels && (
+        <div className="flex-grow grid grid-cols-12 grid-rows-6">
+          {channels.map((channel, i) => {
+            if (channel === null) {
+              return null;
+            }
+
+            const [col, row] = lookupLayout(channels.length, i);
+
+            return (
+              <TwitchPlayer
+                key={channel}
+                className={`col-span-${col} row-span-${row}`}
+                channel={channel}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
